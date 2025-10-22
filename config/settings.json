@@ -1,0 +1,14 @@
+{
+  "prefix": ">s",
+  "logChannels": {
+    "937915188903018498": "1317881540176248904"
+  },
+  "imageScanner": {
+    "937915188903018498": {
+      "timeout": 60000,
+      "threshold": 4,
+      "thresholdType": "exact",
+      "excludedRoles": []
+    }
+  }
+}
