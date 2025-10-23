@@ -1,0 +1,200 @@
+```markdown
+# Shield
+
+Shield is a Discord moderation bot that detects suspicious image-only messages and automatically logs and takes action (timeout/ban) according to server-specific configuration. It can upload flagged images to a dedicated storage server/channel before deleting the original message so moderators can review the media later.
+
+This README explains installation, configuration (including the global image storage server/channel via environment variables), and usage of the bot's commands.
+
+---
+
+## Features
+
+- Detect image-only messages (when message contains only attachments and no text)
+- Configurable threshold (exact or greater-than) for number of images that trigger actions
+- Configurable timeout duration for triggered users
+- Uploads flagged images to a dedicated storage server/channel (configured via environment variables) before deleting the original message
+- Logs security events to a configured log channel with a concise embed (no thumbnails, user mention + user ID, and attachment links)
+- Exclude roles from automatic moderation (logged only)
+
+---
+
+## Requirements
+
+- Node.js 18+ (recommended)
+- A Discord bot token with the bot added to both the monitored guild(s) and the image storage guild
+- The bot must have permission to:
+  - Read and send messages in log channel
+  - Manage messages (delete)
+  - Moderate Members (timeout) in the monitored guild(s)
+  - Send messages and upload files in the storage guild's storage channel
+
+---
+
+## Installation
+
+1. Clone the repository:
+   ```
+   git clone https://github.com/noname9006/Shield.git
+   cd Shield
+   ```
+
+2. Install dependencies:
+   ```
+   npm install
+   ```
+
+   Make sure `axios` is installed (required for re-uploading attachments).
+
+3. Copy `.env.example` to `.env` and fill in values:
+   ```
+   DISCORD_TOKEN=your_bot_token_here
+   IMAGE_STORAGE_SERVER_ID=your_server_id_here
+   IMAGE_STORAGE_CHANNEL_ID=your_channel_id_here
+   ```
+
+4. Start the bot:
+   ```
+   node shield
+   ```
+
+---
+
+## Environment variables
+
+- `DISCORD_TOKEN` — your Discord bot token
+- `IMAGE_STORAGE_SERVER_ID` — the ID of the (global) server/guild where images will be re-uploaded
+- `IMAGE_STORAGE_CHANNEL_ID` — the ID of the channel inside the storage server where images will be uploaded
+
+Note: The storage server/channel are global (not per-guild). The bot must be present in the storage server and have permission to send messages and upload files there.
+
+---
+
+## Configuration (per guild)
+
+The bot stores per-guild configuration in `config/settings.json`:
+
+- `prefix` — default `>s`
+- `logChannels` — map of guildId -> log channel id (set via command below)
+- `imageScanner` — per-guild scanner options:
+  - `timeout` — timeout duration in milliseconds
+  - `threshold` — number of images to trigger
+  - `thresholdType` — `'exact'` or `'greater'`
+  - `excludedRoles` — array of role IDs excluded from action (still logged)
+
+You can change these values using the bot commands below. The config persists to `config/settings.json`.
+
+---
+
+## Commands
+
+Prefix: `>s` (default; found in `src/core/config.js`)
+
+- `>s log #channel`
+  - File: `src/commands/admin/log.js`
+  - Description: Set the log channel for security events.
+  - Permissions: Administrator
+
+- `>s image excluderole`
+  - File: `src/commands/image/excluderole.js`
+  - Description: Add/remove roles excluded from image scanning (excluded users are logged but not timed out).
+  - Usage:
+    - Show: `>s image excluderole`
+    - Add: `>s image excluderole <@role|roleID>`
+    - Remove: `>s image excluderole remove <@role|roleID>`
+  - Permissions: Administrator
+
+- `>s image threshold`
+  - File: `src/commands/image/threshold.js`
+  - Description: Set the image threshold for triggering moderation.
+  - Usage:
+    - Show: `>s image threshold`
+    - Set exact: `>s image threshold 4`
+    - Set greater-than: `>s image threshold >3`
+  - Permissions: Administrator
+
+- `>s image timeout`
+  - File: `src/commands/image/timeout.js`
+  - Description: Set the timeout duration (examples: `30m`, `2h`, `1d`).
+  - Usage:
+    - Show: `>s image timeout`
+    - Set: `>s image timeout 30m`
+  - Permissions: Administrator
+
+---
+
+## Logging & Embed Format
+
+When the bot logs a security action, it will:
+
+- Upload attachments from the flagged message to the configured storage channel (global).
+- Delete the original message.
+- Post an embed to the configured log channel that includes:
+  - Title: "⚠️ Security Alert"
+  - Description with:
+    - User mention and user ID in parentheses (e.g. `@username (123456789012345678)`)
+    - Action details (e.g., `User timed out for 1 minute and message deleted`)
+  - Channel field referencing original channel
+  - Attachments fields: list of attachment links, formatted like:
+    - 🔗 [image.png](full-url)
+    - Each attachment line is a separate line inside an embed field; if the list grows too large for a single embed field it will automatically split into "📎 Attachments" and "📎 Attachments (cont.)".
+  - No image thumbnails are displayed in the embed (only clickable links).
+  - Footer: `Shield Security Bot • Protecting your server`
+
+Filename format in the embed: simplified to `image.<ext>` (e.g., `image.png`), matching simplified, consistent display for all items.
+
+---
+
+## Behavior Flow (when threshold triggers)
+
+1. Bot detects an image-only message with attachments and no text.
+2. Bot checks guild scanner config (threshold, excluded roles).
+3. If excluded role — bot uploads attachments to storage channel and logs event without taking moderation action.
+4. If not excluded and threshold triggers:
+   - Bot uploads attachments to storage channel and collects the re-uploaded URLs.
+   - Bot deletes the original message.
+   - Bot times out the user for the configured duration (if possible).
+   - Bot logs the security event to the configured log channel and includes the uploaded attachment links.
+
+---
+
+## Troubleshooting
+
+- Error: "Log channel not found" — make sure you used `>s log #channel` to set a valid channel for that guild and that the bot can send messages there.
+- Error: embed field too long — the code splits long attachment lists automatically; ensure the bot is up to date.
+- Upload fails — ensure bot is invited to the storage server and has permission to send messages and upload files in the specified channel.
+- If attachments are not images or have unsupported extensions, they may be ignored. Supported extensions list is in `src/modules/scanner/imageScanner.js`.
+
+---
+
+## Files of Interest
+
+- Core
+  - `src/core/client.js` — bootstraps bot, loads events and commands
+  - `src/core/config.js` — persistent settings (settings.json)
+- Events
+  - `src/events/messageCreate.js` — main message handler
+  - `src/events/ready.js` — ready handler
+- Image scanning & actions
+  - `src/modules/scanner/imageScanner.js` — scans messages, applies moderation
+  - `src/modules/moderation/moderationActions.js` — delete, timeout, ban helpers
+  - `src/modules/storage/imageUploader.js` — downloads and re-uploads attachments to storage channel
+  - `src/modules/logging/securityLogger.js` — builds and sends log embed(s)
+- Commands
+  - `src/commands/admin/log.js`
+  - `src/commands/image/excluderole.js`
+  - `src/commands/image/threshold.js`
+  - `src/commands/image/timeout.js`
+
+---
+
+## Contributing
+
+Contributions welcome. Please open issues or pull requests for improvements, bug fixes, or new features. When adding features that change persistent config shape, update `src/core/config.js` defaults and migrate settings as needed.
+
+---
+
+## License
+
+Specify your preferred license here (MIT recommended if you want permissive open-source licensing).
+
+```
